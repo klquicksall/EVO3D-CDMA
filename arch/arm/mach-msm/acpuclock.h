@@ -27,6 +27,7 @@ enum setrate_reason {
 	SETRATE_SWFI,
 	SETRATE_PC,
 	SETRATE_PC_IDLE,
+	SETRATE_HOTPLUG,
 	SETRATE_INIT,
 };
 
@@ -46,4 +47,5 @@ unsigned long acpuclk_get_wfi_rate(void);
 
 
 #endif
+
 
