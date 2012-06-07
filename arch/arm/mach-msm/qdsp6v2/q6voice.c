@@ -2615,20 +2615,24 @@ static int32_t modem_cvp_callback(struct apr_client_data *data, void *priv)
 				pr_debug("%s: cmd = 0x%x\n", __func__, ptr[0]);
 				v->cvp_state = CMD_STATUS_SUCCESS;
 				wake_up(&v->cvp_wait);
-
-			} else if (ptr[0] == VSS_IVOCPROC_CMD_SET_DEVICE) {
-				v->cvp_state = CMD_STATUS_SUCCESS;
-				wake_up(&v->cvp_wait);
                         } else if (ptr[0] == VSS_IVOCPROC_CMD_SET_DEVICE) {
                                 v->cvp_state = CMD_STATUS_SUCCESS;
                                 wake_up(&v->cvp_wait);
-
-			} else if (ptr[0] == VSS_IVOCPROC_CMD_DISABLE) {
+			} else if (ptr[0] ==
+					VSS_IVOCPROC_CMD_SET_RX_VOLUME_INDEX) {
+				v->cvp_state = CMD_STATUS_SUCCESS;
+				wake_up(&v->cvp_wait);
+			} else if (ptr[0] == VSS_IVOCPROC_CMD_ENABLE) {
 				v->cvp_state = CMD_STATUS_SUCCESS;
 				wake_up(&v->cvp_wait);
                         } else if (ptr[0] == VSS_IVOCPROC_CMD_DISABLE) {
                                 v->cvp_state = CMD_STATUS_SUCCESS;
                                 wake_up(&v->cvp_wait);
+			} else if (ptr[0] == APRV2_IBASIC_CMD_DESTROY_SESSION) {
+				v->cvp_state = CMD_STATUS_SUCCESS;
+				wake_up(&v->cvp_wait);
+			} else if (ptr[0] ==
+				VSS_IVOCPROC_CMD_CACHE_VOLUME_CALIBRATION_TABLE
 				) {
 
 				pr_debug("%s: cmd = 0x%x\n", __func__, ptr[0]);
