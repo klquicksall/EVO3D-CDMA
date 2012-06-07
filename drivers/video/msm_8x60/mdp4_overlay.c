@@ -1700,16 +1700,14 @@ int mdp4_overlay_3d(struct fb_info *info, struct msmfb_overlay_3d *req)
 		if(req->is_3d) {
 			init_completion(&ov_comp);
 			atomic_set(&ov_unset, 0);
-		} else {
-			if (mfd->panel_power_on)
-				mdp4_dsi_blt_dmap_busy_wait(mfd);
-		}
+		} else
+			mdp4_dsi_blt_dmap_busy_wait(mfd);
+
 		mdp4_dsi_cmd_3d(mfd, req);
 		virtualfb3d = *req;
 
 		if (req->is_3d == 0) {
-			if (mdp4_dsi_overlay_blt_stop(mfd) == 0
-				&& mfd->panel_power_on)
+                        if (mdp4_dsi_overlay_blt_stop(mfd) == 0)
                                mdp4_dsi_cmd_overlay_restore();
 			atomic_set(&ov_unset, 0);
 			atomic_set(&dsi_unset_cnt, 0);

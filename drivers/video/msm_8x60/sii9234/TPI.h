@@ -16,11 +16,10 @@
  * GNU General Public License for more details.
  *
  *****************************************************************************/
-#include <mach/mhl.h>
 #include "TypeDefs.h"
-#include <mach/board.h>
-bool TPI_Init(mhl_board_params);			/* Document purpose, usage */
-void TPI_Poll(void);			/* Document purpose, usage, rename */
+
+bool TPI_Init (void);			// Document purpose, usage
+void TPI_Poll (void);			// Document purpose, usage, rename
 byte Status_Query(void);
 void D2ToD3(void);
 #define	POWER_STATE_D3				3
@@ -38,7 +37,7 @@ typedef struct
     unsigned char   *pdatabytes;                    // pointer for write burst or read many bytes
 
 } cbus_req_t;
-
+extern void update_mhl_status(bool isMHL);
 bool 	SiiMhlTxChipInitialize( void );
 void SiiMhlTxGetEvents( uint8_t *event, uint8_t *eventParameter );
 #define	APP_DEMO_RCP_SEND_KEY_CODE	0x41
@@ -56,13 +55,5 @@ extern	void	SiiMhlTxGotMhlIntr( uint8_t intr_0, uint8_t intr_1 );
 extern	void	SiiMhlTxGotMhlStatus( uint8_t status_0, uint8_t status_1 );
 extern	void	SiiMhlTxGotMhlMscMsg( uint8_t subCommand, uint8_t cmdData );
 extern	void	SiiMhlTxGotMhlWriteBurst( uint8_t *spadArray );
-extern	bool	IsMHLConnection(void);
-#ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL_HDCP_SUPPORT
-extern	void	hdcp_deauthenticate(void);
-#endif
-extern	void	fill_black_screen(void);
-extern  void	update_mhl_status(bool isMHL, enum usb_connect_type statMHL);
-extern  void	sii9234_disableIRQ(void);
-extern	bool	IsD0Mode(void);
 #endif
 

@@ -205,11 +205,19 @@ static int cable_detect_get_type(struct cable_detect_info *pInfo)
 	if (id_pin == 0 || pInfo->cable_redetect) {
 		CABLE_INFO("%s: id pin low\n", __func__);
 
+		if (pInfo->mhl_reset_gpio != 0)
+			gpio_set_value(pInfo->mhl_reset_gpio, 0); /* Reset Low */
+
 		adc = cable_detect_get_adc();
 
 		if (adc > -100 && adc < 100)
 			type = mhl_detect(pInfo);
 		else {
+			if (pInfo->mhl_reset_gpio != 0)
+				gpio_set_value(pInfo->mhl_reset_gpio, 1); /* Reset High */
+#ifdef CONFIG_FB_MSM_HDMI_MHL_SII9234
+			D2ToD3();
+#endif
 			if (adc > 150 && adc < 220)
 				type = DOCK_STATE_CAR;
 			else if (adc > 370 && adc < 440)
@@ -246,9 +254,6 @@ static void cable_detect_handler(struct work_struct *w)
 	if (pInfo == NULL)
 		return;
 
-	if (pInfo->mhl_reset_gpio != 0)
-		gpio_set_value(pInfo->mhl_reset_gpio, 0); /* Reset Low */
-
 	if (pInfo->detect_type == CABLE_TYPE_PMIC_ADC) {
 		accessory_type = cable_detect_get_type(pInfo);
 		if (accessory_type == -2) {
@@ -258,13 +263,6 @@ static void cable_detect_handler(struct work_struct *w)
 		}
 	} else
 		accessory_type = DOCK_STATE_UNDOCKED;
-
-	if (pInfo->mhl_reset_gpio != 0)
-		gpio_set_value(pInfo->mhl_reset_gpio, 1); /* Reset High */
-#ifdef CONFIG_FB_MSM_HDMI_MHL_SII9234
-	if (accessory_type != DOCK_STATE_MHL)
-		D2ToD3();
-#endif
 
 	switch (accessory_type) {
 	case DOCK_STATE_DESK:
@@ -312,7 +310,6 @@ static void cable_detect_handler(struct work_struct *w)
 			break;
 		case DOCK_STATE_MHL:
 			CABLE_INFO("MHL removed\n");
-			sii9234_disableIRQ();
 			switch_set_state(&dock_switch, DOCK_STATE_UNDOCKED);
 			break;
 		}
@@ -410,9 +407,14 @@ static int mhl_detect(struct cable_detect_info *pInfo)
 
 	if ((pInfo->mhl_version_ctrl_flag) || (adc_value >= 776 && adc_value <= 1020))
 		type = DOCK_STATE_MHL;
-	else
+	else {
 		type = DOCK_STATE_UNDEFINED;
-
+		if (pInfo->mhl_reset_gpio != 0)
+			gpio_set_value(pInfo->mhl_reset_gpio, 1);	/* Reset High */
+#ifdef CONFIG_FB_MSM_HDMI_MHL_SII9234
+		D2ToD3();
+#endif
+	}
 	if (pInfo->config_usb_id_gpios)
 		pInfo->config_usb_id_gpios(0);
 
@@ -507,8 +509,6 @@ static void mhl_status_notifier_func(bool isMHL, bool irq_enble)
 
 	if (!isMHL && pInfo->accessory_type == DOCK_STATE_MHL) {
 		CABLE_INFO("MHL removed\n");
-
-		sii9234_disableIRQ();
 
 		if (pInfo->mhl_usb_switch)
 			pInfo->mhl_usb_switch(0);
