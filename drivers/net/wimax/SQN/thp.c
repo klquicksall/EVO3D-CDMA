@@ -55,8 +55,8 @@ const uint8_t  ss_macaddr[ETH_ALEN] 	= {0x00, 0x16, 0x08, 0xff, 0x00, 0x00};
 extern int sqn_sdio_dump_net_pkt(int on);
 extern int mmc_wimax_get_thp_log(void);
 
-/* Queue of packets destined to the Connection Manager */
-/* TODO: check size of the queue, it's should always be one*/
+// Queue of packets destined to the Connection Manager
+// TODO: check size of the queue, it's should always be one.
 struct sk_buff_head to_sqntool_queue;
 
 DECLARE_WAIT_QUEUE_HEAD(to_sqntool_wait);
@@ -66,15 +66,9 @@ struct net_device *this_device = NULL;
 struct packet_type rx_packet_type = { 0 };
 extern int mmc_wimax_uart_switch(int uart);
 
-/* uint8_t is_thp_packet(uint8_t  *dest_addr) */
-uint8_t sqn_is_rx_thp_packet(uint8_t  *dest_addr)
+uint8_t is_thp_packet(uint8_t  *dest_addr)
 {
 	return (memcmp(dest_addr, host_macaddr, ETH_ALEN)==0);
-}
-
-uint8_t sqn_is_tx_thp_packet(uint8_t  *src_addr)
-{
-	return (memcmp(src_addr, ss_macaddr, ETH_ALEN) == 0);
 }
 
 inline struct ethhdr *skb2ethhdr(const struct sk_buff *skb)
@@ -101,8 +95,8 @@ int thp_handler(struct sk_buff *skb, struct net_device *pDev, struct packet_type
 
 	/* We need only ETH_P_802_2 protocol packets with THP mac address */
 	eth = skb2ethhdr(skb);
-	if ((ntohs(skb->protocol) != ETH_P_802_2) || (!sqn_is_rx_thp_packet(eth->h_dest))) {
-		/* for DDTM, drop all NOT THP packets */
+	if(ntohs(skb->protocol) != ETH_P_802_2 || !is_thp_packet(eth->h_dest)) {
+		//for DDTM, drop all NOT THP packets
 		if(drop_packet) {
 			sqn_pr_dbg("HTC CODE: drop packet for DDTM\n");
 			skb->pkt_type = PACKET_OTHERHOST;
@@ -125,7 +119,7 @@ int thp_handler(struct sk_buff *skb, struct net_device *pDev, struct packet_type
 		kfree_skb(skb_thp);
 	}
 
-	wake_up_interruptible(&to_sqntool_wait);	/* Wake up wait queue */
+	wake_up_interruptible(&to_sqntool_wait);	//Wake up wait queue
 
 thp_out:
     dev_kfree_skb_any(skb); 
@@ -137,7 +131,7 @@ not_thp_out:
 	return NET_RX_SUCCESS;
 }
 
-/* Initialization function for THP handler */
+// Initialization function for THP handler
 int  init_thp_handler(struct net_device *dev)
 {
 	sqn_pr_enter();
@@ -163,7 +157,7 @@ int  init_thp_handler(struct net_device *dev)
 	return 0;
 }
 
-/* Clean up function for THP handler */
+// Clean up function for THP handler
 void cleanup_thp_handler(void)
 {
 	sqn_pr_enter();
@@ -314,7 +308,7 @@ void cleanup_procfs_handler(void)
 
 
 static dev_t dev_num;
-/* static int dev_index; */
+//static int dev_index;
 static struct cdev *thp_dev;
 static struct class *thp_class;
 static struct device *thp_device;
@@ -357,7 +351,7 @@ static int thp_open(struct inode * inode, struct file * filp)
 	printk(KERN_WARNING "thp_open +\n");
 #endif
 
-	/* allow multiple open() call for supporting ioctl on HTC Supersonic */
+	// allow multiple open() call for supporting ioctl on HTC Supersonic
 	/*
 	if(once_open_flag)
 		return -EBUSY;
@@ -559,7 +553,7 @@ static unsigned int thp_poll(struct file *filp, poll_table *wait)
 
 	sqn_pr_enter();
 #if THP_DEBUG
-	/* printk(KERN_WARNING "thp_poll +\n"); */
+	//printk(KERN_WARNING "thp_poll +\n");
 #endif
 
 	poll_wait(filp, &to_sqntool_wait, wait);
@@ -574,7 +568,7 @@ static unsigned int thp_poll(struct file *filp, poll_table *wait)
 	}
 
 #if THP_DEBUG
-	/* printk(KERN_WARNING "thp_poll -\n"); */
+	//printk(KERN_WARNING "thp_poll -\n");
 #endif
 	sqn_pr_leave();
 
@@ -599,15 +593,15 @@ static int thp_ioctl(struct inode* dev, struct file* handle, unsigned int cmd, u
 
         case IOCTL_SWITCH_UART:
 			printk(KERN_WARNING "IOCTL_SWITCH_UART arg=%d\n",(int)arg);
-			mmc_wimax_uart_switch(arg); /* 0: initialize 1: WIMAX_UART to USB 2: WIMAX_UART to MSM 3: USB to USB */
+			mmc_wimax_uart_switch(arg); // 0: initialize 1: WIMAX_UART to USB 2: WIMAX_UART to MSM 3: USB to USB
 			break;  
         
 		 case IOCTL_SWITCH_NETLOG:
 			printk(KERN_WARNING "IOCTL_SWITCH_NETLOG arg=%d\n",(int)arg);
 			if(arg == 0) 
-			    sqn_sdio_dump_net_pkt(0); /* Enable netlog */
+			    sqn_sdio_dump_net_pkt(0); // Enable netlog
 			else 
-				sqn_sdio_dump_net_pkt(1); /* Disable netlog */
+				sqn_sdio_dump_net_pkt(1); // Disable netlog
 			break;  
 
 		default:
@@ -630,7 +624,7 @@ int init_thp_devfile(void)
 	printk(KERN_WARNING "init_thp_devfile +\n");
 #endif
 
-	/* Dynamic allocation of device number */
+	//Dynamic allocation of device number
 	if(alloc_chrdev_region(&dev_num, 0, 1, thp_filename))
 		return -ENOMEM;
 
@@ -701,10 +695,10 @@ int thp_wimax_uart_switch(int on)
     printk("%s on%d\n", __func__, on);
 
 	if (on) {
-		mmc_wimax_uart_switch(2);	/* Wimax */
+        mmc_wimax_uart_switch(2); // Wimax
 	}
 	else {
-		mmc_wimax_uart_switch(0);	/* USB */
+        mmc_wimax_uart_switch(0); // USB
 	}
 
 	return 0;
