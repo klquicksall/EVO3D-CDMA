@@ -38,21 +38,13 @@ typedef enum
 
 typedef struct
 {
-	bool valid;
-	uint8_t regA3;
-	uint8_t regA6;
-} mhl_board_params;
-
-typedef struct {
 	int gpio_intr;
 	int gpio_reset;
 	int ci2ca;
 	void (*mhl_usb_switch)(int);
 	void (*mhl_1v2_power)(bool enable);
 	int (*power)(int);
-	mhl_board_params board_params;
 }T_MHL_PLATFORM_DATA;
-
 //********************************************************************
 //  Define & Macro
 //********************************************************************
