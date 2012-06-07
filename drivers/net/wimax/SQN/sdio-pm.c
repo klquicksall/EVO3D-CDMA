@@ -44,8 +44,6 @@ u8* __sqn_pm_per_file_dbg_addr(void)
 }
 
 #define IGNORE_CARRIER_STATE 1
-extern int mmc_wimax_get_hostwakeup_gpio(void);
-extern void mmc_wimax_enable_host_wakeup(int on);
 
 enum sqn_thsp_service {
 #define	THSP_LSP_SERVICE_BASE		0x10010000
@@ -218,7 +216,7 @@ static void free_last_request(void)
 }
 
 
-static struct sk_buff* lsp_to_skb(struct sqn_lsp_packet *lsp_packet)
+static struct sk_buff *lsp_to_skb(struct sqn_lsp_packet *lsp_packet) /* RX */
 {
 	struct sqn_eth_header eth_header = {
 		.len = htons(sizeof(struct sqn_lsp_packet))
@@ -273,7 +271,8 @@ static struct sk_buff* construct_lsp_packet(u32 id, u32 param1, u32 param2)
 	switch (id) {
 	case THSP_GET_MEDIA_CONNECTION_STATE:
 		/* no parameters are needed */
-		sqn_pr_dbg("TX LSP: THSP_GET_MEDIA_CONNECTION_STATE\n");
+		if (mmc_wimax_get_sdio_lsp_log())
+			sqn_pr_info("TX LSP: THSP_GET_MEDIA_CONNECTION_STATE\n");
 		lsp_packet.thp_header.length =
 			htons(sizeof(struct sqn_lsp_header) - 4);
 		lsp_packet.thp_header.total_length =
@@ -281,7 +280,8 @@ static struct sk_buff* construct_lsp_packet(u32 id, u32 param1, u32 param2)
 		break;
 	case THSP_SET_POWER_MODE:
 		/* deprecated */
-		sqn_pr_dbg("TX LSP: THSP_SET_POWER_MODE (deprecated)\n");
+		if (mmc_wimax_get_sdio_lsp_log())
+			sqn_pr_info("TX LSP: THSP_SET_POWER_MODE (deprecated)\n");
 		break;
 	case THSP_SET_HOST_POWER_MODE:
 		lsp_packet.thp_header.length =
@@ -290,9 +290,11 @@ static struct sk_buff* construct_lsp_packet(u32 id, u32 param1, u32 param2)
 			htonl(sizeof(struct sqn_lsp_header));
 		lsp_packet.lsp_header.u.host_power.tid = htonl(get_next_tid());
 		lsp_packet.lsp_header.u.host_power.mode = htonl(param1);
-		sqn_pr_dbg("TX LSP: THSP_SET_HOST_POWER_MODE, tid: 0x%x, mode: %d\n"
-			, ntohl(lsp_packet.lsp_header.u.host_power.tid)
-			, param1);
+		if (mmc_wimax_get_sdio_lsp_log()) {
+			sqn_pr_info("TX LSP: THSP_SET_HOST_POWER_MODE, tid: 0x%x, mode: %d\n"
+				, ntohl(lsp_packet.lsp_header.u.host_power.tid)
+				, param1);
+		}
 		break;
 	case THSP_SET_FW_POWER_MODE:
 		lsp_packet.thp_header.length =
@@ -301,9 +303,11 @@ static struct sk_buff* construct_lsp_packet(u32 id, u32 param1, u32 param2)
 			htonl(sizeof(struct sqn_lsp_header));
 		lsp_packet.lsp_header.u.fw_power.tid = htonl(get_next_tid());
 		lsp_packet.lsp_header.u.fw_power.mode = htonl(param1);
-		sqn_pr_dbg("TX LSP: THSP_SET_FW_POWER_MODE, tid: 0x%x, mode: %d\n"
-			, htonl(lsp_packet.lsp_header.u.fw_power.tid)
-			, param1);
+		if (mmc_wimax_get_sdio_lsp_log()) {
+			sqn_pr_info("TX LSP: THSP_SET_FW_POWER_MODE, tid: 0x%x, mode: %d\n"
+				, htonl(lsp_packet.lsp_header.u.fw_power.tid)
+				, param1);
+		}
 		break;
 	case THSP_SQN_STATE_CHANGE_REPLY:
 		lsp_packet.thp_header.length =
@@ -311,8 +315,10 @@ static struct sk_buff* construct_lsp_packet(u32 id, u32 param1, u32 param2)
 		lsp_packet.thp_header.total_length =
 			htonl(sizeof(struct sqn_lsp_header) - 4);
 		lsp_packet.lsp_header.u.fw_state.tid = htonl(param1);
-		sqn_pr_dbg("TX LSP: THSP_SQN_STATE_CHANGE_REPLY, tid: %xh\n"
-			, param1);
+		if (mmc_wimax_get_sdio_lsp_log()) {
+			sqn_pr_info("TX LSP: THSP_SQN_STATE_CHANGE_REPLY, tid: %xh\n"
+				, param1);
+		}
 		break;
 	case THSP_THP_AVAILABLE_REPLY:
 		lsp_packet.thp_header.length =
@@ -321,11 +327,14 @@ static struct sk_buff* construct_lsp_packet(u32 id, u32 param1, u32 param2)
 			htonl(sizeof(struct sqn_lsp_header));
 		lsp_packet.lsp_header.u.thp_avl.tid = htonl(param1);
 		lsp_packet.lsp_header.u.thp_avl.reply = htonl(param2);
-		sqn_pr_dbg("TX LSP: THSP_THP_AVAILABLE_REPLY, tid: 0x%x, reply: %d\n"
-			, param1, param2);
+		if (mmc_wimax_get_sdio_lsp_log()) {
+			sqn_pr_info("TX LSP: THSP_THP_AVAILABLE_REPLY, tid: 0x%x, reply: %d\n"
+				, param1, param2);
+		}
 		break;
 	default:
-		sqn_pr_dbg("TX LSP: UNKNOWN\n");
+		if (mmc_wimax_get_sdio_lsp_log())
+			sqn_pr_info("TX LSP: UNKNOWN\n");
 	}
 
 	skb = lsp_to_skb(&lsp_packet);
@@ -336,7 +345,7 @@ static struct sk_buff* construct_lsp_packet(u32 id, u32 param1, u32 param2)
 }
 
 
-int is_lsp_packet(const struct sk_buff *skb)
+int sqn_is_rx_lsp_packet(const struct sk_buff *skb)
 {
 	struct sqn_eth_header *eth_hdr = (struct sqn_eth_header*)skb->data;
 
@@ -346,6 +355,18 @@ int is_lsp_packet(const struct sk_buff *skb)
 
 	return !memcmp(eth_hdr->dst_addr, g_lsp_host_mac
 		, sizeof(g_lsp_host_mac));
+}
+
+int sqn_is_tx_lsp_packet(const struct sk_buff *skb)
+{
+	struct sqn_eth_header *eth_hdr = (struct sqn_eth_header*)skb->data;
+
+	/* sqn_pr_dbg_dump("skb________", skb->data, skb->len); */
+	/* sqn_pr_dbg_dump("lsp_dev_mac", g_lsp_device_mac, sizeof(g_lsp_device_mac)); */
+	/* sqn_pr_dbg_dump("skb_addr___", eth_hdr->src_addr, sizeof(g_lsp_device_mac)); */
+
+	return !memcmp(eth_hdr->src_addr, g_lsp_device_mac
+		, sizeof(g_lsp_device_mac));
 }
 
 
@@ -519,25 +540,25 @@ static void handle_sqn_state_change_msg(struct sqn_private *priv
 
 	switch (card_state) {
 	case LSP_SQN_ACTIVE:
-		sqn_pr_info("card switched to ACTIVE state\n");
+		sqn_pr_info("card switched to ACTIVE state (OPT)\n");
 		spin_lock_irqsave(&priv->drv_lock, irq_flags);
 		card->is_card_sleeps = 0;
 		spin_unlock_irqrestore(&priv->drv_lock, irq_flags);
 		break;
 	case LSP_SQN_IDLE:
-		sqn_pr_info("card switched to IDLE state\n");
+		sqn_pr_info("card switched to IDLE state (LPM)\n");
 		spin_lock_irqsave(&priv->drv_lock, irq_flags);
 		card->is_card_sleeps = 1;
 		spin_unlock_irqrestore(&priv->drv_lock, irq_flags);
 		break;
 	case LSP_SQN_DROPPED:
-		sqn_pr_info("card switched to DROPPED state\n");
+		sqn_pr_info("card switched to DROPPED state (LPM)\n");
 		spin_lock_irqsave(&priv->drv_lock, irq_flags);
 		card->is_card_sleeps = 1;
 		spin_unlock_irqrestore(&priv->drv_lock, irq_flags);
 		break;
 	case LSP_SQN_REENTRY:
-		sqn_pr_info("card switched to REENTRY state\n");
+		sqn_pr_info("card switched to REENTRY state (LPM)\n");
 		spin_lock_irqsave(&priv->drv_lock, irq_flags);
 		card->is_card_sleeps = 1;
 		spin_unlock_irqrestore(&priv->drv_lock, irq_flags);
@@ -565,7 +586,7 @@ static void handle_thp_avl_msg(struct sqn_private *priv
 {
 	struct sqn_sdio_card *card = priv->card;
 	struct sk_buff *skb_reply = 0;
-	enum sqn_thp_available_reply thp_rpl; 
+	enum sqn_thp_available_reply thp_rpl;
 	unsigned long irq_flags = 0;
 
 	sqn_pr_enter();
@@ -573,17 +594,20 @@ static void handle_thp_avl_msg(struct sqn_private *priv
 	spin_lock_irqsave(&priv->drv_lock, irq_flags);
 	/* if (card->is_card_sleeps) { */
 	if (priv->is_tx_queue_empty(priv)) {
-		sqn_pr_dbg("TX queue empty, thp_rpl=FINISH\n");
+		if (mmc_wimax_get_sdio_lsp_log())
+			sqn_pr_info("TX queue empty, thp_rpl=FINISH\n");
 		/* sqn_pr_dbg("card was asleep, thp_rpl=FINISH\n"); */
 		thp_rpl = LSP_THPA_FINISHED;
 		card->is_card_sleeps = 1;
+		gHostWakeupFWEvent = 0;
 	/* } else if (priv->is_tx_queue_empty(priv)) { */
 		/* sqn_pr_dbg("card was not asleep and tx_queue is empty, thp_rpl=FINISHED\n"); */
 		/* thp_rpl = LSP_THPA_FINISHED; */
 		/* card->is_card_sleeps = 1; */
 	} else {
 		/* sqn_pr_info("card was not asleep but tx_queue is no empty, thp_rpl=EXIT\n"); */
-		sqn_pr_dbg("TX queue not empty, thp_rpl=ACK\n");
+		if (mmc_wimax_get_sdio_lsp_log())
+			sqn_pr_info("TX queue not empty, thp_rpl=ACK\n");
 		/* sqn_pr_dbg("card was not asleep, thp_rpl=ACK\n"); */
 		thp_rpl = LSP_THPA_ACK;
 		card->is_card_sleeps = 0;
@@ -597,6 +621,10 @@ static void handle_thp_avl_msg(struct sqn_private *priv
 	wake_up_interruptible(&g_card_sleep_waitq);
 	if (netif_queue_stopped(priv->dev))
 		netif_wake_queue(priv->dev);
+
+	if (!card->is_card_sleeps && !gHostWakeupFWEvent) {
+		gHostWakeupFWEvent = 1; /* Dump next TX packet after LSP ThpAvailableReply(ACK); */
+	}
 
 	sqn_pr_leave();
 }
@@ -612,7 +640,7 @@ int sqn_handle_lsp_packet(struct sqn_private *priv
 
 	sqn_pr_enter();
 
-	if (!is_lsp_packet(skb)) {
+	if (!sqn_is_rx_lsp_packet(skb)) {
 		sqn_pr_dbg("not LSP packet\n");
 		sqn_pr_leave();
 		return 0;
@@ -622,24 +650,28 @@ int sqn_handle_lsp_packet(struct sqn_private *priv
 
 	switch (ntohl(lsp_response->lsp_header.id)) {
 	case THSP_GET_MEDIA_CONNECTION_STATE:
-		sqn_pr_dbg("RX LSP: THSP_GET_MEDIA_CONNECTION_STATE state=%xh\n"
-			, ntohl(lsp_response->lsp_header.u.media_con_state));
+		if (mmc_wimax_get_sdio_lsp_log()) {
+			sqn_pr_info("RX LSP: THSP_GET_MEDIA_CONNECTION_STATE state=%xh\n"
+				, ntohl(lsp_response->lsp_header.u.media_con_state));
+		}
 		sqn_pr_warn("THSP_GET_MEDIA_CONNECTION_STATE not implemented\n");
 		break;
 	case THSP_MEDIA_CONNECTION_STATE_CHANGE:
-		sqn_pr_dbg("RX LSP: THSP_MEDIA_CONNECTION_STATE_CHANGE state=%xh\n"
-			, ntohl(lsp_response->lsp_header.u.media_con_state));
+		if (mmc_wimax_get_sdio_lsp_log()) {
+			sqn_pr_info("RX LSP: THSP_MEDIA_CONNECTION_STATE_CHANGE state=%xh\n"
+				, ntohl(lsp_response->lsp_header.u.media_con_state));
+		}
 		if (THSP_MEDIA_CONNECTION_ATTACHED
 			== ntohl(lsp_response->lsp_header.u.media_con_state))
 		{
-			
+
 #if IGNORE_CARRIER_STATE
             /* netif_carrier_on(priv->dev); */
             sqn_pr_info("WiMAX carrier PRESENT [ignored]\n");
 #else
             netif_carrier_on(priv->dev);
 			sqn_pr_info("WiMAX carrier PRESENT\n");
-#endif            
+#endif
 		} else {
 #if IGNORE_CARRIER_STATE
 			/* netif_carrier_off(priv->dev); */
@@ -651,8 +683,10 @@ int sqn_handle_lsp_packet(struct sqn_private *priv
 		}
 		break;
 	case THSP_SET_HOST_POWER_MODE_ACK:
-		sqn_pr_dbg("RX LSP: THSP_SET_HOST_POWER_MODE_ACK tid=0x%x\n"
-			, ntohl(lsp_response->lsp_header.u.host_power.tid));
+		if (mmc_wimax_get_sdio_lsp_log()) {
+			sqn_pr_info("RX LSP: THSP_SET_HOST_POWER_MODE_ACK tid=0x%x\n"
+				, ntohl(lsp_response->lsp_header.u.host_power.tid));
+		}
 		free_last_request();
 		spin_lock_irqsave(&priv->drv_lock, irq_flags);
 		card->is_card_sleeps = 1;
@@ -660,25 +694,33 @@ int sqn_handle_lsp_packet(struct sqn_private *priv
 		signal_pm_request_completion(priv);
 		break;
 	case THSP_SET_FW_POWER_MODE_ACK:
-		sqn_pr_dbg("RX LSP: THSP_SET_FW_POWER_MODE_ACK tid=0x%x\n"
-			, ntohl(lsp_response->lsp_header.u.fw_power.tid));
-		sqn_pr_dbg("THSP_SET_FW_POWER_MODE_ACK not implemented\n");
+		if (mmc_wimax_get_sdio_lsp_log()) {
+			sqn_pr_info("RX LSP: THSP_SET_FW_POWER_MODE_ACK tid=0x%x\n"
+				, ntohl(lsp_response->lsp_header.u.fw_power.tid));
+		}
+		sqn_pr_info("THSP_SET_FW_POWER_MODE_ACK not implemented\n");
 		break;
 	case THSP_SQN_STATE_CHANGE:
-		sqn_pr_dbg("RX LSP: THSP_SQN_STATE_CHANGE tid=0x%x, state=%xh\n"
-			, ntohl(lsp_response->lsp_header.u.fw_state.tid)
-			, ntohl(lsp_response->lsp_header.u.fw_state.state));
+		if (mmc_wimax_get_sdio_lsp_log()) {
+			sqn_pr_info("RX LSP: THSP_SQN_STATE_CHANGE tid=0x%x, state=%xh\n"
+				, ntohl(lsp_response->lsp_header.u.fw_state.tid)
+				, ntohl(lsp_response->lsp_header.u.fw_state.state));
+		}
 		handle_sqn_state_change_msg(priv, lsp_response);
 		break;
 	case THSP_THP_AVAILABLE:
-		sqn_pr_dbg("RX LSP: THSP_THP_AVAILABLE tid=0x%x, reply=%xh\n"
-			, ntohl(lsp_response->lsp_header.u.thp_avl.tid)
-			, ntohl(lsp_response->lsp_header.u.thp_avl.reply));
+		if (mmc_wimax_get_sdio_lsp_log()) {
+			sqn_pr_info("RX LSP: THSP_THP_AVAILABLE tid=0x%x, reply=%xh\n"
+				, ntohl(lsp_response->lsp_header.u.thp_avl.tid)
+				, ntohl(lsp_response->lsp_header.u.thp_avl.reply));
+		}
 		handle_thp_avl_msg(priv, lsp_response);
 		break;
 	default:
-		sqn_pr_dbg("RX LSP: UNKNOWN=0x%x\n"
-			, ntohl(lsp_response->lsp_header.id));
+		if (mmc_wimax_get_sdio_lsp_log()) {
+			sqn_pr_info("RX LSP: UNKNOWN=0x%x\n"
+				, ntohl(lsp_response->lsp_header.id));
+		}
 	}
 
 	dev_kfree_skb_any(skb);
@@ -705,10 +747,13 @@ int sqn_wakeup_fw(struct sdio_func *func)
 
 	sqn_pr_enter();
 	sqn_pr_info("waking up the card...\n");
-	
-	if (!wake_lock_active(&card->wakelock)) {
-		sqn_pr_dbg("lock wake_lock\n");
-		wake_lock(&card->wakelock);
+
+	if (!wake_lock_active(&card->wakelock_tx)) {
+		if (mmc_wimax_get_sdio_wakelock_log()) {
+			printk(KERN_INFO "[WIMAX] lock wl_tx2,");
+			PRINTRTC;
+		}
+		wake_lock(&card->wakelock_tx);
 		need_to_unlock_wakelock = 1;
 	}
 
@@ -732,14 +777,20 @@ retry:
 
 	if (rv) {
 		sqn_pr_err("error when reading SDIO_VERSION\n");
+
+		if (mmc_wimax_get_wimax_FW_freeze_WK_TX()) {
+			sqn_pr_info("[ste]set is_card_sleeps 0 to avoid TX polling\n");
+			card->is_card_sleeps = 0;
+		}
+
 		sdio_release_host(func);
 		goto out;
-	} else {
+	} else
 		sqn_pr_dbg("SDIO_VERSION has been read successfully\n");
-	}
 
 	sqn_pr_dbg("send wake-up signal to card\n");
 	sdio_writeb(func, 1, SQN_SOC_SIGS_LSBS, &rv);
+
 	if (rv)
 		sqn_pr_err("error when writing to SQN_SOC_SIGS_LSBS: %d\n", rv);
 
@@ -775,9 +826,12 @@ retry:
 	}
 
 out:
-	if (need_to_unlock_wakelock && wake_lock_active(&card->wakelock)) {
-		sqn_pr_dbg("wake_lock is active, release it\n");
-		wake_unlock(&card->wakelock);
+	if (need_to_unlock_wakelock && wake_lock_active(&card->wakelock_tx)) {
+		if (mmc_wimax_get_sdio_wakelock_log()) {
+			printk(KERN_INFO "[WIMAX] release wake_lock_tx in %s,", __func__);
+			PRINTRTC;
+		}
+		wake_unlock(&card->wakelock_tx); /* TX */
 	}
 	sqn_pr_leave();
 	return rv;

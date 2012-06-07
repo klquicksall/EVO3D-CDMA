@@ -51,6 +51,8 @@ struct sqn_thp_header {
 int init_thp(struct net_device* dev);
 int thp_wimax_uart_switch(int on);
 void cleanup_thp(void);
+uint8_t sqn_is_rx_thp_packet(uint8_t  *dest_addr);
+uint8_t sqn_is_tx_thp_packet(uint8_t  *src_addr);
 
 #endif  /* _SQN_THP2_H */
 

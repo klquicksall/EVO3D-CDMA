@@ -16,6 +16,7 @@
  *****************************************************************************/
 
 #include <linux/input.h>
+#include <mach/board.h>
 #include	"defs.h"
 #include	"sii_mhltx_api.h"
 #include	"sii_mhltx.h"
@@ -34,6 +35,9 @@ static	void		MhlTxResetStates( void );
 static	bool		MhlTxSendMscMsg ( uint8_t command, uint8_t cmdData );
 extern	uint8_t		rcpSupportTable [];
 
+#ifdef CONFIG_INTERNAL_CHARGING_SUPPORT
+static uint8_t Chk_Dongle_Step;
+#endif
 
 void SiiMhlTxInitialize( bool interruptDriven, uint8_t pollIntervalMs )
 {
@@ -43,6 +47,11 @@ void SiiMhlTxInitialize( bool interruptDriven, uint8_t pollIntervalMs )
 
 	MhlTxResetStates( );
 
+#ifdef CONFIG_INTERNAL_CHARGING_SUPPORT
+	Chk_Dongle_Step=0;
+#endif
+
+//	SiiMhlTxChipInitialize ();
 }
 
 void SiiMhlTxGetEvents( uint8_t *event, uint8_t *eventParameter )
@@ -141,6 +150,179 @@ static	void	MhlTxDriveStates( void )
 	}
 }
 
+#ifdef CONFIG_INTERNAL_CHARGING_SUPPORT
+extern void ProcessMhlStatus(bool, bool);
+extern int mscCmdInProgress;
+extern enum usb_connect_type gStatusMHL;
+
+bool Tri_state_dongle_GPIO0(void)
+{
+	bool result = true;
+
+#if 1
+
+#define	INTR_CBUS1_DESIRED_MASK			(BIT_2 | BIT_3 | BIT_4 | BIT_5 | BIT_6)
+#define	UNMASK_CBUS1_INTERRUPTS			I2C_WriteByte(CBUS_SLAVE_ADDR, 0x09, INTR_CBUS1_DESIRED_MASK)
+#define	MASK_CBUS1_INTERRUPTS			I2C_WriteByte(CBUS_SLAVE_ADDR, 0x09, 0x00)
+#define	INTR_CBUS2_DESIRED_MASK			(BIT_2 | BIT_3 | BIT_4)
+#define	UNMASK_CBUS2_INTERRUPTS			I2C_WriteByte(CBUS_SLAVE_ADDR, 0x1F, INTR_CBUS2_DESIRED_MASK)
+#define	MASK_CBUS2_INTERRUPTS			I2C_WriteByte(CBUS_SLAVE_ADDR, 0x1F, 0x00)
+
+	int timeout = 100;
+
+	MASK_CBUS1_INTERRUPTS;
+	MASK_CBUS2_INTERRUPTS;
+
+
+	//don't activate this function before problem solved
+	return result;
+
+
+	while(mscCmdInProgress && --timeout) {
+		hr_msleep(1);
+	}
+
+	printk("%s: timeout = %d\n", __func__, timeout);
+
+	if(!timeout) {
+		result = false;
+		goto l_end;
+	}
+#endif
+	I2C_WriteByte(CBUS_SLAVE_ADDR,0x13, 0x33);       // enable backdoor access
+	I2C_WriteByte(CBUS_SLAVE_ADDR,0x14, 0x80);
+	I2C_WriteByte(CBUS_SLAVE_ADDR,0x12, 0x08);
+
+	// Set GPIO0=Input
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0xc0,  0xff);          // main page  ; FE for Cbus page
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0xc1,  0x7F);        // offset
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0xc2,  0xFF);       // data set GPIO=input
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x20,  0x02);         // burst length-1
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x13,  0x48);         // offset in scratch pad
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x12,  0x10);        // trig this command
+
+	I2C_WriteByte(CBUS_SLAVE_ADDR,0x13, 0x33);           // disable backdoor access
+	I2C_WriteByte(CBUS_SLAVE_ADDR,0x14, 0x00);
+	I2C_WriteByte(CBUS_SLAVE_ADDR,0x12, 0x08);
+
+#if 1
+l_end:
+	UNMASK_CBUS2_INTERRUPTS;
+	UNMASK_CBUS1_INTERRUPTS;
+#endif
+
+	return result;
+}
+
+void Low_dongle_GPIO0(void)
+{
+
+	I2C_WriteByte(CBUS_SLAVE_ADDR,0x13, 0x33);                               // enable backdoor access
+	I2C_WriteByte(CBUS_SLAVE_ADDR,0x14, 0x80);
+	I2C_WriteByte(CBUS_SLAVE_ADDR,0x12, 0x08);
+
+	// Set GPIO0=low
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0xc0,  0xff);                              // main page  ; FE for Cbus page
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0xc1,  0x7F);                             // offset
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0xc2,  0xFC);                             // data set GPIO0=Lo ; 0xF3 set GPIO1=Lo
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x20,  0x02);                             // burst length-1
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x13,  0x48);                             // offset in scratch pad
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x12,  0x10);                             // trig this command
+
+	I2C_WriteByte(CBUS_SLAVE_ADDR,0x13, 0x33);                               // disable backdoor access
+	I2C_WriteByte(CBUS_SLAVE_ADDR,0x14, 0x00);
+	I2C_WriteByte(CBUS_SLAVE_ADDR,0x12, 0x08);
+}
+
+void SiiMhlTxMscDetectCharger( uint8_t data1)
+{
+	if ((data1 & 0x13) == 0x11) { 							 // connected to TV; and TV has power output (default 0.5A min )
+		/* Turn off phone Vbus output ; */
+		/* Set battery charge current=500mA; */
+		/* Enable battery charger; */
+		mscCmdInProgress = false;
+		mhlTxConfig.mscState	  = MSC_STATE_POW_DONE;
+	}
+
+	if ((data1 & 0x03) == 0x03) {			 /* 03=dongle */
+
+		if (Chk_Dongle_Step == 0) {
+
+			if (!Tri_state_dongle_GPIO0()) {
+				TPI_DEBUG_PRINT(("%s: faild to set as GPI\n", __func__));
+				mscCmdInProgress = false;
+				return;
+			}
+
+			/* GPIO0_state=3; */
+
+			mscCmdInProgress = false;
+			SiiMhlTxReadDevcap(02);		/* send ReadDevCapReg0x02 packet out; POW will be returned on next MhlCbusIsr( ) */
+			mscCmdInProgress = false;
+			Chk_Dongle_Step = 1;
+		}
+
+		if (Chk_Dongle_Step == 1) {
+
+			mscCmdInProgress = false;
+
+			if ((data1 & 0x10)) {			 /* POW bit=1=Rx has power */
+				/* Turn off phone Vbus output ; */
+				Low_dongle_GPIO0();
+
+				/* GPIO0_state = 0;  */
+				SiiMhlTxReadDevcap(02);			  /* send ReadDevCapReg0x02 packet out; POW will be returned on next MhlCbusIsr( ) */
+				mscCmdInProgress = false;
+				Chk_Dongle_Step = 2;
+			} else {
+
+/*				Chk_Dongle_Step=3; */
+				Chk_Dongle_Step = 0;
+
+				mhlTxConfig.mscState = MSC_STATE_POW_DONE;
+
+				/* turn on phone VBUS output.; */
+				TPI_DEBUG_PRINT(("No charger!!\n"));
+
+				if (gStatusMHL != CONNECT_TYPE_NONE) {
+					gStatusMHL = CONNECT_TYPE_NONE;
+					ProcessMhlStatus(true, false);
+				}
+				/*system should periodically call siiMhlTxReadDevcap(02), next siiMhlTxGetEvents( )  MhlCbusIsr( ) will on/off Vbus, set charge current here */
+			}
+		}
+
+		if (Chk_Dongle_Step == 2) {			   /*GPIO0_low=true */
+
+			mhlTxConfig.mscState = MSC_STATE_POW_DONE;				/*02 ;*/
+			mscCmdInProgress = false;
+
+/*			Chk_Dongle_Step=3; */
+			Chk_Dongle_Step = 0;
+
+			if (data1 & 0x10) { 			 /*[bit4] POW ==1=AC charger attached*/
+				/* Set charge battery current=AC charger rating-100mA ; */
+
+				/* Enable battery charger; &*/
+				TPI_DEBUG_PRINT(("1000mA charger!!\n"));
+				if (gStatusMHL != CONNECT_TYPE_AC) {
+					gStatusMHL = CONNECT_TYPE_AC;
+					ProcessMhlStatus(true, false);
+				}
+
+			} else {	/* charger port only has USB source provide 5V/100mA , that just enough dongle to work, no more current to charge phone battery */
+				/* turn off phone VBUS output; */
+				/* at least no need to send out 5V/100mA power*/
+				TPI_DEBUG_PRINT(("500mA charger!!\n"));
+				if (gStatusMHL != CONNECT_TYPE_USB) {
+					gStatusMHL = CONNECT_TYPE_USB;
+					ProcessMhlStatus(true, false);
+				}
+			}
+		}
+	}
+}
+#endif
 void	SiiMhlTxMscCommandDone( uint8_t data1 )
 {
 	TPI_DEBUG_PRINT( ("MhlTx: SiiMhlTxMscCommandDone. data1 = %02X\n", (int) data1) );
@@ -148,6 +330,11 @@ void	SiiMhlTxMscCommandDone( uint8_t data1 )
 	if(( MHL_READ_DEVCAP == mhlTxConfig.mscLastCommand ) &&
 			(0x02 == mhlTxConfig.mscLastOffset))
 	{
+
+#ifdef CONFIG_INTERNAL_CHARGING_SUPPORT
+		SiiMhlTxMscDetectCharger(data1);
+#endif
+
 		mhlTxConfig.mscState	= MSC_STATE_POW_DONE;
 	}
 	else if((MHL_READ_DEVCAP == mhlTxConfig.mscLastCommand) &&
@@ -277,8 +464,9 @@ void	SiiMhlTxNotifyDsHpdChange( uint8_t dsHpdStatus )
 {
 	if( 0 == dsHpdStatus )
 	{
+		/* Mark this by Michael
 	    TPI_DEBUG_PRINT(("MhlTx: Disable TMDS\n"));
-		SiiMhlTxDrvTmdsControl( false );
+		SiiMhlTxDrvTmdsControl( false );*/
 	}
 	else
 	{

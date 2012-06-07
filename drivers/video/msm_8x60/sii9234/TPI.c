@@ -24,6 +24,7 @@
 #include "i2c_master_sw.h"
 #include "inc/si_datatypes.h"
 #include <linux/jiffies.h>
+#include <mach/board.h>
 
 static unsigned long rsenCheckTimeout = 0;
 static unsigned long deglitchTimeout = 0;
@@ -31,15 +32,24 @@ static int rsenCount = 0;
 static int initCbus = true;
 
 static	uint8_t	fwPowerState = POWER_STATE_FIRST_INIT;
+#ifdef CONFIG_INTERNAL_CHARGING_SUPPORT
+
+/* To remember current MHL connection status */
+enum usb_connect_type gStatusMHL = CONNECT_TYPE_UNKNOWN;
+static bool gConnectMHL = false;
+#endif
 
 #ifdef	APPLY_SCDT_SAFETY
 static	uint8_t	gotFifoUnderRunOverRun = 0;
 #endif
 static	bool	deglitchingRsenNow = false;
 
-static uint8_t		mscCmdInProgress;
+uint8_t		mscCmdInProgress;	/* false when it is okay to send a new command */
 static	uint8_t	dsHpdStatus = 0;
 
+/* HTC board parameters */
+
+static mhl_board_params gBoardParams;
 
 #define	I2C_READ_MODIFY_WRITE(saddr,offset,mask)	I2C_WriteByte(saddr, offset, I2C_ReadByte(saddr, offset) | (mask));
 
@@ -47,6 +57,9 @@ static	uint8_t	dsHpdStatus = 0;
 #define	CLR_BIT(saddr,offset,bitnumber)		I2C_WriteByte(saddr, offset, I2C_ReadByte(saddr, offset) & ~(1<<bitnumber))
 #define	DISABLE_DISCOVERY				CLR_BIT(TPI_SLAVE_ADDR, 0x90, 0);
 #define	ENABLE_DISCOVERY				SET_BIT(TPI_SLAVE_ADDR, 0x90, 0);
+#define   INTR_2_DESIRED_MASK            (BIT_0)
+#define   UNMASK_INTR_2_INTERRUPTS       I2C_WriteByte(TPI_SLAVE_ADDR, 0x76, INTR_2_DESIRED_MASK)
+#define   MASK_INTR_2_INTERRUPTS         I2C_WriteByte(TPI_SLAVE_ADDR, 0x76, 0x00)
 #define	INTR_4_DESIRED_MASK				(BIT_0 | BIT_2 | BIT_3 | BIT_4 | BIT_5 | BIT_6)
 #define	UNMASK_INTR_4_INTERRUPTS		I2C_WriteByte(TPI_SLAVE_ADDR, 0x78, INTR_4_DESIRED_MASK)
 #define	MASK_INTR_4_INTERRUPTS			I2C_WriteByte(TPI_SLAVE_ADDR, 0x78, 0x00)
@@ -75,6 +88,12 @@ static	void	ReleaseUsbIdSwitchOpen ( void );
 static	void	MhlTxDrvProcessConnection ( void );
 static	void	MhlTxDrvProcessDisconnection ( void );
 static	void	ApplyDdcAbortSafety( void);
+
+static  bool	HDCPSuccess;
+
+#ifdef CONFIG_CABLE_DETECT_ACCESSORY
+void    ProcessMhlStatus(bool, bool);
+#endif
 
 #define	APPLY_PLL_RECOVERY
 
@@ -113,10 +132,12 @@ static void TxHW_Reset(void) {
 	sii9234_reset();
 	}
 
-bool TPI_Init(void)
+bool TPI_Init(mhl_board_params params)
 {
 	fwPowerState = POWER_STATE_FIRST_INIT;
 	initCbus = true;
+	gBoardParams = params;
+	HDCPSuccess = false;
 	SiiMhlTxInitialize( true, 0);
 
 
@@ -141,6 +162,9 @@ void	TPI_Poll(void)
 	{
 
 		Int4Isr();
+#ifdef CONFIG_INTERNAL_CHARGING_SUPPORT
+		gStatusMHL = CONNECT_TYPE_UNKNOWN;
+#endif
 	}
 	else if( POWER_STATE_D0_MHL == fwPowerState )
 	{
@@ -151,10 +175,18 @@ void	TPI_Poll(void)
 			TPI_DEBUG_PRINT(("Drv: rsen = %lu time = %lu\n", rsenCheckTimeout, jiffies));
 
 				if (initCbus) {
-	                                I2C_WriteByte(CBUS_SLAVE_ADDR,0x13, 0x20) ;
-	                                I2C_WriteByte(CBUS_SLAVE_ADDR,0x14, 0x01) ;
-					I2C_WriteByte(CBUS_SLAVE_ADDR,0x12, 0x08) ;
-					initCbus = false;
+					if (!(I2C_ReadByte(TPI_SLAVE_ADDR, 0x09) & BIT_2)) { /* if Rsen=0 , should be dongle has no power */
+						TPI_DEBUG_PRINT(("400ms exp, Rsen=0,discnct\n"));
+						DISABLE_DISCOVERY;                    /* Page0Reg0x90[0]=0 */
+						ENABLE_DISCOVERY;                     /* Page0Reg0x90[0]=1 */
+						MhlTxDrvProcessDisconnection();
+						return ;
+					} else {
+						I2C_WriteByte(CBUS_SLAVE_ADDR, 0x13, 0x20) ;
+						I2C_WriteByte(CBUS_SLAVE_ADDR, 0x14, 0x01) ;
+						I2C_WriteByte(CBUS_SLAVE_ADDR, 0x12, 0x08) ;
+						initCbus = false;
+					}
 				}
 				Int1RsenIsr();
 				if(deglitchingRsenNow)
@@ -177,12 +209,22 @@ void	TPI_Poll(void)
 
 }
 
+void SiiMhlTxDrvReleaseUpstreamHPDControl(void)
+{
+	/* Un-force HPD (it was kept low, now propagate to source
+	   let HPD float by clearing reg_hpd_out_ovr_en */
+	CLR_BIT(TPI_SLAVE_ADDR, 0x79, 4);
+	TPI_DEBUG_PRINT(("Drv:%d Upstream HPD released.\n", (int)__LINE__));
+}
+
+
 void	SiiMhlTxDrvTmdsControl( bool enable )
 {
 	if( enable )
 	{
 		SET_BIT(TPI_SLAVE_ADDR, 0x80, 4);
 	    TPI_DEBUG_PRINT(("Drv: TMDS Output Enabled\n"));
+		SiiMhlTxDrvReleaseUpstreamHPDControl();  /* this triggers an EDID read */
 	}
 	else
 	{
@@ -381,8 +423,13 @@ static void WriteInitialRegisterValues ( void )
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0xA0, 0xD0);
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0xA1, 0xFC);
 
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0xA3, 0xEB);
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0xA6, 0x0C);
+		if (gBoardParams.valid) { /*assign value by board*/
+			I2C_WriteByte(TPI_SLAVE_ADDR, 0xA3, gBoardParams.regA3);
+			I2C_WriteByte(TPI_SLAVE_ADDR, 0xA6, gBoardParams.regA6);
+		} else { /*default settings*/
+			I2C_WriteByte(TPI_SLAVE_ADDR, 0xA3, 0xEB);
+			I2C_WriteByte(TPI_SLAVE_ADDR, 0xA6, 0x0C);
+		}
 
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x2B, 0x01);
 
@@ -481,6 +528,33 @@ static void InitCBusRegs( void )
 
 }
 
+uint8_t ReadHPD(void)
+{
+	uint8_t RetVal = 1;
+	char buffer[2];
+
+	buffer[0] = 0x0D;
+	if (fwPowerState == POWER_STATE_D0_MHL)
+		RetVal = sii9234_I2C_RxData(CBUS_SLAVE_ADDR, buffer, 1);
+
+	TPI_DEBUG_PRINT(("Drv: ReadHPD: %X\n", (int)buffer[0]));
+
+	if (RetVal == 0) {
+		if ((buffer[0]&0x40) == 0x40)
+			return 1;
+	}
+
+    return 0;
+}
+
+
+
+void SetHDCPStatus(bool Status)
+{
+	HDCPSuccess = Status;
+}
+
+
 static void ForceUsbIdSwitchOpen ( void )
 {
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x90, 0x26);
@@ -503,30 +577,49 @@ static void ReleaseUsbIdSwitchOpen ( void )
 
 void CbusWakeUpPulseGenerator(void)
 {
+	uint8_t		regval;
+
 	TPI_DEBUG_PRINT(("Drv: CbusWakeUpPulseGenerator\n"));
 
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) | 0xC0));
+	regval = I2C_ReadByte(TPI_SLAVE_ADDR, 0x96);
+	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) | 0xC0));*/
+	regval |= 0xC0;
+	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_1 - 2);	// adjust for code path
 
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) & 0x3F));
+	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) & 0x3F));*/
+	regval &= 0x3F;
+	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_1 - 2);	// adjust for code path
 
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) | 0xC0));
+	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) | 0xC0));*/
+	regval |= 0xC0;
+	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_1 - 2);	// adjust for code path
 
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) & 0x3F));
+	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) & 0x3F));*/
+	regval &= 0x3F;
+	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_2 - 2);	// adjust for code path
 
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) | 0xC0));
+	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) | 0xC0));*/
+	regval |= 0xC0;
+	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_1 - 2);	// adjust for code path
 
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) & 0x3F));
+	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) & 0x3F));*/
+	regval &= 0x3F;
+	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_1 - 2);	// adjust for code path
 
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) | 0xC0));
+	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) | 0xC0));*/
+	regval |= 0xC0;
+	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_1 - 2);	// adjust for code path
 
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) & 0x3F));
+	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) & 0x3F));*/
+	regval &= 0x3F;
+	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 
 	DelayMS(T_SRC_WAKE_TO_DISCOVER);
 
@@ -581,6 +674,15 @@ void	ProcessRgnd( void )
 	}
 }
 
+bool	IsD0Mode(void)
+{
+	if (POWER_STATE_D0_MHL != fwPowerState) {
+		return false;
+	} else {
+		return true;
+	}
+}
+
 void	SwitchToD0( void )
 {
 	TPI_DEBUG_PRINT(("Drv: Switch To Full power mode (D0)\n"));
@@ -621,6 +723,38 @@ void	SwitchToD3( void )
 	}
 }
 
+#ifdef CONFIG_CABLE_DETECT_ACCESSORY
+#ifdef CONFIG_INTERNAL_CHARGING_SUPPORT
+void ProcessMhlStatus(bool connect, bool force)
+{
+	if (force) {
+
+		gConnectMHL = connect;
+
+		/* if connected, let DetectCharger to report the status */
+		if (connect)
+			return;
+		else
+			gStatusMHL = CONNECT_TYPE_UNKNOWN;
+
+	} else {
+		/* the connection has been closed, no need to report the charger status */
+		if (!gConnectMHL && gStatusMHL) {
+			TPI_DEBUG_PRINT(("DetectCharger: no need to report the charger status?\n"));
+			return;
+		}
+	}
+
+	update_mhl_status(gConnectMHL, gStatusMHL);
+}
+#else
+void ProcessMhlStatus(bool connect, bool force)
+{
+	update_mhl_status(connect, CONNECT_TYPE_UNKNOWN);
+}
+#endif
+#endif
+
 static	void	Int4Isr( void )
 {
 	uint8_t		reg74;
@@ -634,9 +768,12 @@ static	void	Int4Isr( void )
 
 	if(reg74 & BIT_2)
 	{
+		initCbus = true;  /* Force reinit CBus */
 		MhlTxDrvProcessConnection();
+		UNMASK_INTR_2_INTERRUPTS;
+		UNMASK_INTR_4_INTERRUPTS;
 #ifdef CONFIG_CABLE_DETECT_ACCESSORY
-		update_mhl_status(true);
+		ProcessMhlStatus(true, true);
 #endif
 	}
 
@@ -644,7 +781,7 @@ static	void	Int4Isr( void )
 	{
 		MhlTxDrvProcessDisconnection();
 #ifdef CONFIG_CABLE_DETECT_ACCESSORY
-		update_mhl_status(false);
+		ProcessMhlStatus(false, true);
 #endif
 	//		return;
 	}
@@ -653,6 +790,7 @@ static	void	Int4Isr( void )
 	{
 		SwitchToD0();
 		ProcessRgnd();
+		UNMASK_INTR_1_INTERRUPTS;
 	}
 
 	if (reg74 & BIT_4)
@@ -662,7 +800,7 @@ static	void	Int4Isr( void )
 		ForceUsbIdSwitchOpen();
 		ReleaseUsbIdSwitchOpen();
 #ifdef CONFIG_CABLE_DETECT_ACCESSORY
-		update_mhl_status(false);
+		ProcessMhlStatus(false, true);
 #endif
 
 	}
@@ -672,6 +810,8 @@ static	void	Int4Isr( void )
 #ifdef	APPLY_PLL_RECOVERY
 static void ApplyPllRecovery ( void )
 {
+	if (!HDCPSuccess)
+		return;
 
 	CLR_BIT(TPI_SLAVE_ADDR, 0x80, 4);
 
@@ -692,6 +832,7 @@ void SiiMhlTxDrvRecovery( void )
 	if((I2C_ReadByte(TPI_SLAVE_ADDR, (0x74)) & BIT_0))
 	{
 		SET_BIT(TPI_SLAVE_ADDR, (0x74), BIT_0);
+		TPI_DEBUG_PRINT(("Drv: SCDT Interrupt\n"));
 
 		if ( (((I2C_ReadByte(TPI_SLAVE_ADDR, 0x81)) & BIT_1) >> 1) )
 		{
@@ -743,7 +884,7 @@ static void MhlTxDrvProcessConnection ( void )
 	rsenCount = 0;
 	SiiMhlTxNotifyConnection(mhlConnected = true);
 #ifdef CONFIG_CABLE_DETECT_ACCESSORY
-	update_mhl_status(true);
+	ProcessMhlStatus(true, true);
 #endif
 	UNMASK_INTR_1_INTERRUPTS;
 }
@@ -763,11 +904,19 @@ static void MhlTxDrvProcessDisconnection ( void )
 	{
 		SiiMhlTxNotifyConnection(mhlConnected = false);
 #ifdef CONFIG_CABLE_DETECT_ACCESSORY
-		update_mhl_status(false);
+		ProcessMhlStatus(false, true);
 #endif
 	}
 
 	SwitchToD3();
+}
+
+bool IsMHLConnection(void)
+{
+	if ((fwPowerState == POWER_STATE_D0_MHL) && (!initCbus))
+		return true;
+	else
+		return false;
 }
 
 void	CbusReset()
@@ -879,6 +1028,9 @@ static void MhlCbusIsr( void )
 	}
 	if((cbusInt & BIT_5) || (cbusInt & BIT_6))
 	{
+		if (initCbus && (cbusInt&BIT_5))
+			return; /* don't clear pending int, until 400ms sw delay expired */
+
 		gotData[0] = CBusProcessErrors(cbusInt);
 	}
 	if(cbusInt)

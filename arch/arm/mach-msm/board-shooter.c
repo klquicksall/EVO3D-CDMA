@@ -312,8 +312,8 @@ static struct regulator_consumer_supply saw_s1_supply =
 static struct regulator_init_data saw_s0_init_data = {
 		.constraints = {
 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
-			.min_uV = 800000,
-			.max_uV = 1450000,
+			.min_uV = 840000,
+			.max_uV = 1250000,
 		},
 		.num_consumer_supplies = 1,
 		.consumer_supplies = &saw_s0_supply,
@@ -322,8 +322,8 @@ static struct regulator_init_data saw_s0_init_data = {
 static struct regulator_init_data saw_s1_init_data = {
 		.constraints = {
 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
-			.min_uV = 800000,
-			.max_uV = 1450000,
+			.min_uV = 840000,
+			.max_uV = 1250000,
 		},
 		.num_consumer_supplies = 1,
 		.consumer_supplies = &saw_s1_supply,
@@ -1340,8 +1340,8 @@ static struct spi_board_info sp3d_spi_board_info[] __initdata = {
 };
 
 static struct camera_flash_cfg msm_camera_sensor_flash_cfg = {
-	.low_temp_limit		= 5,
-	.low_cap_limit		= 10,
+	.low_temp_limit		= 10,
+	.low_cap_limit		= 15,
 };
 
 #ifdef CONFIG_SP3D
@@ -1915,9 +1915,10 @@ static struct resource msm_fb_resources[] = {
 };
 
 static struct platform_device shooter_3Dpanel_device = {
-	.name = "panel_3d",
-	.id = -1,
+       .name = "panel_3d",
+       .id = -1,
 };
+
 
 #ifdef CONFIG_BT
 static struct platform_device shooter_rfkill = {
@@ -2437,9 +2438,9 @@ static struct rpm_vreg_pdata rpm_vreg_init_pdata[RPM_VREG_ID_MAX] = {
 	RPM_VREG_INIT_LDO(PM8058_L24, 0, 1, 0, 1200000, 1200000, LDO150HMIN, 0), /* N/A */
 	RPM_VREG_INIT_LDO(PM8058_L25, 0, 1, 0, 1200000, 1200000, LDO150HMIN, 0), /* N/A */
 
-	RPM_VREG_INIT_SMPS(PM8058_S0, 0, 1, 1,  500000, 1450000, SMPS_HMIN, 0,
+	RPM_VREG_INIT_SMPS(PM8058_S0, 0, 1, 1,  500000, 1250000, SMPS_HMIN, 0,
 		RPM_VREG_FREQ_1p92),
-	RPM_VREG_INIT_SMPS(PM8058_S1, 0, 1, 1,  500000, 1450000, SMPS_HMIN, 0,
+	RPM_VREG_INIT_SMPS(PM8058_S1, 0, 1, 1,  500000, 1250000, SMPS_HMIN, 0,
 		RPM_VREG_FREQ_1p92),
 	RPM_VREG_INIT_SMPS(PM8058_S2, 0, 1, 0, 1200000, 1400000, SMPS_HMIN,
 		RPM_VREG_PIN_CTRL_A0, RPM_VREG_FREQ_1p92),
@@ -3009,7 +3010,11 @@ static struct platform_device *surf_devices[] __initdata = {
 	&msm_rotator_device,
 #endif
 	&shooter_3Dpanel_device,
-	&msm_device_kgsl,
+	&msm_kgsl_3d0,
+#ifdef CONFIG_MSM_KGSL_2D
+	&msm_kgsl_2d0,
+	&msm_kgsl_2d1,
+#endif
 #ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
 	&hdmi_msm_device,
 #endif /* CONFIG_FB_MSM_HDMI_MSM_PANEL */

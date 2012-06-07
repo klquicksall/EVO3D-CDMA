@@ -263,14 +263,17 @@ static void cable_status_notifier_func(enum usb_connect_type online)
 	case CONNECT_TYPE_USB:
 		BATT_LOG("cable USB");
 		htc_batt_info.rep.charging_source = CHARGER_USB;
+		radio_set_cable_status(CHARGER_USB);
 		break;
 	case CONNECT_TYPE_AC:
 		BATT_LOG("cable AC");
 		htc_batt_info.rep.charging_source = CHARGER_AC;
+		radio_set_cable_status(CHARGER_AC);
 		break;
 	case CONNECT_TYPE_WIRELESS:
 		BATT_LOG("cable wireless");
 		htc_batt_info.rep.charging_source = CHARGER_WIRELESS;
+		radio_set_cable_status(CHARGER_WIRELESS);
 		break;
 	case CONNECT_TYPE_UNKNOWN:
 		BATT_ERR("unknown cable");
@@ -280,6 +283,7 @@ static void cable_status_notifier_func(enum usb_connect_type online)
 	default:
 		BATT_LOG("No cable exists");
 		htc_batt_info.rep.charging_source = CHARGER_BATTERY;
+		radio_set_cable_status(CHARGER_BATTERY);
 		break;
 	}
 	htc_batt_timer.alarm_timer_flag =
@@ -308,19 +312,24 @@ static int htc_batt_charger_control(enum charger_control_flag control)
 {
 	char message[16] = "CHARGERSWITCH=";
 	char *envp[] = { message, NULL };
+	int ret = 0;
 
 	BATT_LOG("%s: switch charger to mode: %u", __func__, control);
 
-	if (control == STOP_CHARGER)
+	if (control == STOP_CHARGER) {
 		strncat(message, "0", 1);
-	else if (control == ENABLE_CHARGER)
+		kobject_uevent_env(&htc_batt_info.batt_cable_kobj, KOBJ_CHANGE, envp);
+	} else if (control == ENABLE_CHARGER) {
 		strncat(message, "1", 1);
+		kobject_uevent_env(&htc_batt_info.batt_cable_kobj, KOBJ_CHANGE, envp);
+	} else if (control == ENABLE_LIMIT_CHARGER)
+		ret = tps_set_charger_ctrl(ENABLE_LIMITED_CHG);
+	else if (control == DISABLE_LIMIT_CHARGER)
+		ret = tps_set_charger_ctrl(CLEAR_LIMITED_CHG);
 	else
 		return -1;
 
-	kobject_uevent_env(&htc_batt_info.batt_cable_kobj, KOBJ_CHANGE, envp);
-
-	return 0;
+	return ret;
 }
 
 static void htc_batt_set_full_level(int percent)

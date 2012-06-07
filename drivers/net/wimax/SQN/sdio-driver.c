@@ -144,6 +144,9 @@ int sqn_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		 */
 		priv->stats.tx_dropped++;
 		priv->stats.tx_errors++;
+
+		dev_kfree_skb_any(skb);
+
 		spin_unlock_irqrestore(&priv->drv_lock, irq_flags);
 		goto out;
 	}

@@ -22,6 +22,18 @@
 #include "version.h"
 #include "debugfs.h"
 
+#include <linux/rtc.h>
+
+#define PRINTRTC  do { \
+struct timespec ts; \
+struct rtc_time tm; \
+getnstimeofday(&ts); \
+rtc_time_to_tm(ts.tv_sec, &tm); \
+printk(KERN_INFO " at %d-%02d-%02d %02d:%02d:%02d UTC\n", \
+tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, \
+tm.tm_hour, tm.tm_min, tm.tm_sec); \
+} while (0)
+
 #define sqn_pr(level, fmt, arg...)			\
 do {							\
 	char kthread_name[TASK_COMM_LEN] = { 0 };	\
@@ -102,9 +114,10 @@ do {								\
 	pr_err("%s: " fmt, SQN_MODULE_NAME, ##arg)
 
 
-void sqn_pr_info_dump(char *prefix, unsigned char *data, unsigned int len);
+int sqn_pr_info_dump(char *prefix, unsigned char *data, unsigned int len);
 void sqn_pr_thp_info_dump(char *prefix, unsigned char *data, unsigned int len);
 void sqn_pr_info_dump_rawdata(char *prefix, unsigned char *data, unsigned int len);
+void sqn_pr_info_dump_rawdata_lite(char *prefix, unsigned char *data, unsigned int len);
 int sqn_filter_packet_check(char *prefix, unsigned char *data, unsigned int len);
 
 /*

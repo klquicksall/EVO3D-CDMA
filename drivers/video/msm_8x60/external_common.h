@@ -254,5 +254,10 @@ void hdmi_common_init_panel_info(struct msm_panel_info *pinfo);
 
 int external_common_state_create(struct platform_device *pdev);
 void external_common_state_remove(void);
-
+#ifdef CONFIG_FB_MSM_HDMI_MHL_SII9234
+extern  uint8_t ReadHPD(void);
+extern void update_mhl_status(bool isMHL, enum usb_connect_type statMHL);
+extern bool IsD0Mode(void);
+extern void SetHDCPStatus(bool Status);
+#endif
 #endif /* __EXTERNAL_COMMON_H__ */

@@ -42,8 +42,12 @@ struct sqn_sdio_card {
 	struct mutex		rx_mutex;
 	struct mutex		rxq_mutex;
 	wait_queue_head_t	pm_waitq;
-	struct wake_lock	wakelock;
-    struct timer_list	wakelock_timer;
+	struct wake_lock	wakelock_host;
+    struct wake_lock	wakelock_tx;
+    struct wake_lock	wakelock_rx;
+    struct timer_list	wakelock_timer_host;
+    struct timer_list	wakelock_timer_tx;
+    struct timer_list	wakelock_timer_rx;
 
 	/* Condition flags for event signaling */
 	u8			pm_complete;

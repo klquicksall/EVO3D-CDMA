@@ -263,6 +263,8 @@ static ssize_t htc_battery_charger_switch(struct device *dev,
 	if (rc)
 		return rc;
 
+	BATT_LOG("Set charger_control:%lu", enable);
+
 	if (enable >= END_CHARGER)
 		return -EINVAL;
 
@@ -271,22 +273,12 @@ static ssize_t htc_battery_charger_switch(struct device *dev,
 		return -ENOENT;
 	}
 
-	if (enable == STOP_CHARGER) {
-		rc = battery_core_info.func.func_charger_control(STOP_CHARGER);
-		if (rc < 0) {
-			BATT_ERR("charger control failed!");
-			return rc;
-		}
-		charger_ctrl_stat = STOP_CHARGER;
-	} else if (enable == ENABLE_CHARGER) {
-		rc = battery_core_info.func.func_charger_control(
-							    ENABLE_CHARGER);
-		if (rc < 0) {
-			BATT_ERR("charger control failed!");
-			return rc;
-		}
-		charger_ctrl_stat = ENABLE_CHARGER;
+	rc = battery_core_info.func.func_charger_control(enable);
+	if (rc < 0) {
+		BATT_ERR("charger control failed!");
+		return rc;
 	}
+	charger_ctrl_stat = enable;
 
 	alarm_cancel(&batt_charger_ctrl_alarm);
 

@@ -20,6 +20,12 @@ int mmc_wimax_set_netlog_withraw_status(int on);
 int mmc_wimax_get_netlog_withraw_status(void);
 int mmc_wimax_set_sdio_interrupt_log(int on);
 int mmc_wimax_get_sdio_interrupt_log(void);
+int mmc_wimax_set_sdio_wakelock_log(int on);
+int mmc_wimax_get_sdio_wakelock_log(void);
+int mmc_wimax_set_sdio_lsp_log(int on);
+int mmc_wimax_get_sdio_lsp_log(void);
+int mmc_wimax_set_sdio_wakeup_lite_dump(int on);
+int mmc_wimax_get_sdio_wakeup_lite_dump(void);
 int mmc_wimax_set_packet_filter(int on);
 int mmc_wimax_get_packet_filter(void);
 int mmc_wimax_set_thp_log(int on);
@@ -40,5 +46,9 @@ int mmc_wimax_get_gpio_irq_enabled(void);
 int mmc_wimax_trigger_RD_FIFO_LEVEL_ERROR(int on);
 int mmc_wimax_get_RD_FIFO_LEVEL_ERROR(void);
 
+int mmc_wimax_set_wimax_FW_freeze_WK_RX(int on);
+int mmc_wimax_get_wimax_FW_freeze_WK_RX(void);
+int mmc_wimax_set_wimax_FW_freeze_WK_TX(int on);
+int mmc_wimax_get_wimax_FW_freeze_WK_TX(void);
 #endif
 

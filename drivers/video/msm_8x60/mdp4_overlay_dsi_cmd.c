@@ -434,7 +434,8 @@ int mdp4_dsi_overlay_blt_stop(struct msm_fb_data_type *mfd)
 	unsigned long flag;
 
 	if ((dsi_pipe->blt_end == 0) && dsi_pipe->blt_addr) {
-		mdp4_dsi_blt_dmap_busy_wait(dsi_mfd);
+		if (mfd->panel_power_on)
+			mdp4_dsi_blt_dmap_busy_wait(dsi_mfd);
 		pr_info("%s: blt_end=%d blt_addr=%x pid=%d\n",
 			__func__, dsi_pipe->blt_end, (int)dsi_pipe->blt_addr, current->pid);
 		spin_lock_irqsave(&mdp_spin_lock, flag);
